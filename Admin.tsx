@@ -362,13 +362,52 @@ const DashboardPage = ({ setActive }) => {
 
 // ── Listings Review Page ──────────────────────────────────────────────────
 const ListingsPage = () => {
-  const [listings, setListings] = useState(PENDING_LISTINGS);
+  const [listings, setListings] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("pending");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const fetchListings = async () => {
+    setLoading(true);
+    const { data, error: err } = await supabase
+      .from("listings")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (err) { setError(err.message); setLoading(false); return; }
+
+    // 出品者情報を別途取得
+    const sellerIds = [...new Set((data || []).map(l => l.seller_id))];
+    const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("id", sellerIds);
+    const profileMap = {};
+    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+
+    // auth.usersからメールアドレスを取得は権限がないため、display_nameのみ使用
+    setListings((data || []).map(l => ({
+      id: l.id,
+      title: l.title,
+      seller: profileMap[l.seller_id]?.display_name || "不明",
+      sellerEmail: "",
+      sellerId: l.seller_id,
+      category: ({ illust:"似顔絵", clothes:"お洋服", photo:"フォト", goods:"グッズ", food:"フード", training:"しつけ" })[l.category] || l.category,
+      price: l.price,
+      pet: l.pet_type,
+      desc: l.description,
+      images: l.image_urls?.length || 0,
+      imageUrls: l.image_urls || [],
+      date: new Date(l.created_at).toLocaleDateString("ja-JP"),
+      status: l.status,
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchListings(); }, []);
 
   const filtered = listings.filter(l => filter==="all" || l.status===filter);
 
-  const handleAction = (id, action) => {
+  const handleAction = async (id, action) => {
+    const { error: err } = await supabase.from("listings").update({ status: action }).eq("id", id);
+    if (err) { alert("更新に失敗しました: " + err.message); return; }
     setListings(prev => prev.map(l => l.id===id ? {...l, status:action} : l));
     setSelected(null);
   };
@@ -399,72 +438,79 @@ const ListingsPage = () => {
         </div>
       </div>
 
-      <div style={{ background:T.white, borderRadius:16, border:`1px solid ${T.border}`, overflow:"hidden" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead>
-            <tr style={{ background:T.lightGray }}>
-              {["出品名","出品者","カテゴリ","価格","申請日","ステータス","操作"].map(h=>(
-                <th key={h} style={{ padding:"12px 16px", fontSize:11, fontWeight:700, color:T.warmGray, textAlign:"left", borderBottom:`1px solid ${T.border}` }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(item => {
-              const st = statusLabel(item.status);
-              return (
-                <tr key={item.id} style={{ borderBottom:`1px solid ${T.border}`, cursor:"pointer", transition:"background 0.1s" }}
-                  onMouseEnter={e=>e.currentTarget.style.background=T.lightGray}
-                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}
-                >
-                  <td style={{ padding:"14px 16px" }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:T.dark }}>{item.title}</div>
-                    <div style={{ fontSize:11, color:T.warmGray }}>画像 {item.images}枚</div>
-                  </td>
-                  <td style={{ padding:"14px 16px" }}>
-                    <div style={{ fontSize:13, fontWeight:600, color:T.dark }}>{item.seller}</div>
-                    <div style={{ fontSize:10, color:T.warmGray }}>{item.sellerEmail}</div>
-                  </td>
-                  <td style={{ padding:"14px 16px", fontSize:12, color:T.dark }}>{item.category}</td>
-                  <td style={{ padding:"14px 16px", fontSize:13, fontWeight:800, color:T.orange }}>¥{item.price.toLocaleString()}</td>
-                  <td style={{ padding:"14px 16px", fontSize:12, color:T.warmGray }}>{item.date}</td>
-                  <td style={{ padding:"14px 16px" }}>
-                    <span style={{ background:st.bg, color:st.color, fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:8 }}>{st.text}</span>
-                  </td>
-                  <td style={{ padding:"14px 16px" }}>
-                    {item.status==="pending" ? (
-                      <div style={{ display:"flex", gap:6 }}>
-                        <button onClick={()=>handleAction(item.id,"approved")} style={{
-                          padding:"6px 14px", background:T.green, border:"none", borderRadius:8,
-                          color:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
-                        }}>✅ 承認</button>
-                        <button onClick={()=>handleAction(item.id,"rejected")} style={{
-                          padding:"6px 14px", background:T.white, border:`1.5px solid ${T.red}`,
-                          borderRadius:8, color:T.red, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
-                        }}>却下</button>
+      {error && <div style={{ background:T.redPale, color:T.red, padding:"10px 14px", borderRadius:10, fontSize:13, marginBottom:16 }}>{error}</div>}
+
+      {loading ? (
+        <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>
+          <div style={{ fontSize:13 }}>読み込み中...</div>
+        </div>
+      ) : (
+        <div style={{ background:T.white, borderRadius:16, border:`1px solid ${T.border}`, overflow:"hidden" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead>
+              <tr style={{ background:T.lightGray }}>
+                {["出品名","出品者","カテゴリ","価格","申請日","ステータス","操作"].map(h=>(
+                  <th key={h} style={{ padding:"12px 16px", fontSize:11, fontWeight:700, color:T.warmGray, textAlign:"left", borderBottom:`1px solid ${T.border}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(item => {
+                const st = statusLabel(item.status);
+                return (
+                  <tr key={item.id} style={{ borderBottom:`1px solid ${T.border}`, cursor:"pointer", transition:"background 0.1s" }}
+                    onMouseEnter={e=>e.currentTarget.style.background=T.lightGray}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}
+                  >
+                    <td style={{ padding:"14px 16px" }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:T.dark }}>{item.title}</div>
+                      <div style={{ fontSize:11, color:T.warmGray }}>画像 {item.images}枚</div>
+                    </td>
+                    <td style={{ padding:"14px 16px" }}>
+                      <div style={{ fontSize:13, fontWeight:600, color:T.dark }}>{item.seller}</div>
+                    </td>
+                    <td style={{ padding:"14px 16px", fontSize:12, color:T.dark }}>{item.category}</td>
+                    <td style={{ padding:"14px 16px", fontSize:13, fontWeight:800, color:T.orange }}>¥{item.price.toLocaleString()}</td>
+                    <td style={{ padding:"14px 16px", fontSize:12, color:T.warmGray }}>{item.date}</td>
+                    <td style={{ padding:"14px 16px" }}>
+                      <span style={{ background:st.bg, color:st.color, fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:8 }}>{st.text}</span>
+                    </td>
+                    <td style={{ padding:"14px 16px" }}>
+                      {item.status==="pending" ? (
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={()=>handleAction(item.id,"approved")} style={{
+                            padding:"6px 14px", background:T.green, border:"none", borderRadius:8,
+                            color:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
+                          }}>✅ 承認</button>
+                          <button onClick={()=>handleAction(item.id,"rejected")} style={{
+                            padding:"6px 14px", background:T.white, border:`1.5px solid ${T.red}`,
+                            borderRadius:8, color:T.red, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
+                          }}>却下</button>
+                          <button onClick={()=>setSelected(item)} style={{
+                            padding:"6px 10px", background:T.lightGray, border:"none", borderRadius:8,
+                            color:T.warmGray, fontSize:11, cursor:"pointer", fontFamily:"inherit"
+                          }}>詳細</button>
+                        </div>
+                      ) : (
                         <button onClick={()=>setSelected(item)} style={{
                           padding:"6px 10px", background:T.lightGray, border:"none", borderRadius:8,
                           color:T.warmGray, fontSize:11, cursor:"pointer", fontFamily:"inherit"
                         }}>詳細</button>
-                      </div>
-                    ) : (
-                      <button onClick={()=>setSelected(item)} style={{
-                        padding:"6px 10px", background:T.lightGray, border:"none", borderRadius:8,
-                        color:T.warmGray, fontSize:11, cursor:"pointer", fontFamily:"inherit"
-                      }}>詳細</button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {filtered.length===0 && (
-          <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>
-            <div style={{ fontSize:40, marginBottom:8 }}>✨</div>
-            <div style={{ fontWeight:700 }}>該当する出品がありません</div>
-          </div>
-        )}
-      </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {filtered.length===0 && (
+            <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>
+              <div style={{ fontSize:40, marginBottom:8 }}>✨</div>
+              <div style={{ fontWeight:700 }}>該当する出品がありません</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Detail Modal */}
       {selected && (
@@ -476,8 +522,16 @@ const ListingsPage = () => {
               <h2 style={{ fontSize:18, fontWeight:900, color:T.dark }}>出品詳細</h2>
               <button onClick={()=>setSelected(null)} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:T.warmGray }}>✕</button>
             </div>
+            {/* 画像プレビュー */}
+            {selected.imageUrls && selected.imageUrls.length > 0 && (
+              <div style={{ display:"flex", gap:8, marginBottom:16, overflowX:"auto" }}>
+                {selected.imageUrls.map((url, i) => (
+                  <img key={i} src={url} alt="" style={{ width:100, height:100, borderRadius:10, objectFit:"cover", flexShrink:0 }}/>
+                ))}
+              </div>
+            )}
             <div style={{ background:T.lightGray, borderRadius:14, padding:"16px", marginBottom:16 }}>
-              {[["タイトル",selected.title],["出品者",`${selected.seller} (${selected.sellerEmail})`],["カテゴリ",selected.category],["対象",selected.pet==="dog"?"🐕 犬":selected.pet==="cat"?"🐈 猫":"🐾 両方"],["料金",`¥${selected.price.toLocaleString()}`],["画像枚数",`${selected.images}枚`],["申請日",selected.date]].map(([k,v])=>(
+              {[["タイトル",selected.title],["出品者",selected.seller],["カテゴリ",selected.category],["対象",selected.pet==="dog"?"🐕 犬":selected.pet==="cat"?"🐈 猫":"🐾 両方"],["料金",`¥${selected.price.toLocaleString()}`],["画像枚数",`${selected.images}枚`],["申請日",selected.date]].map(([k,v])=>(
                 <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
                   <span style={{ fontSize:12, color:T.warmGray }}>{k}</span>
                   <span style={{ fontSize:12, fontWeight:700, color:T.dark }}>{v}</span>
