@@ -1,5 +1,12 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from "recharts";
+
+// ── Supabase Client ───────────────────────────────────────────────────────
+const supabase = createClient(
+  "https://qufrqkuipzuqeqkvuhkx.supabase.co",
+  "sb_publishable_TWEGFx7kfggQffOSzs31Jg_J3yYZqou"
+);
 
 // ── Theme ─────────────────────────────────────────────────────────────────
 const T = {
@@ -1236,10 +1243,157 @@ const SupportPage = () => {
   );
 };
 
+// ── Admin Login Page ──────────────────────────────────────────────────────
+const AdminLoginPage = ({ onLogin, error }) => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLocalError("");
+    setLoading(true);
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (err) { setLocalError("メールアドレスまたはパスワードが違います"); return; }
+    onLogin(data.user);
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:T.cream, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Noto Sans JP',sans-serif" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+      <div style={{ background:T.white, borderRadius:20, padding:"40px 32px", width:"100%", maxWidth:400, border:`1px solid ${T.border}`, boxShadow:"0 4px 20px rgba(0,0,0,0.06)" }}>
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🔐</div>
+          <h1 style={{ fontSize:22, fontWeight:900, color:T.dark, marginBottom:6, fontFamily:"'Helvetica Neue',Arial,sans-serif" }}>Qocca Admin</h1>
+          <p style={{ fontSize:12, color:T.warmGray }}>管理者専用ページ</p>
+        </div>
+        {(error || localError) && (
+          <div style={{ background:T.redPale, color:T.red, padding:"10px 14px", borderRadius:10, fontSize:12, marginBottom:16, fontWeight:700 }}>
+            {localError || error}
+          </div>
+        )}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom:14 }}>
+            <label style={{ fontSize:12, fontWeight:700, color:T.dark, display:"block", marginBottom:6 }}>メールアドレス</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required
+              style={{ width:"100%", padding:"11px 12px", borderRadius:10, border:`1.5px solid ${T.border}`, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+          </div>
+          <div style={{ marginBottom:20 }}>
+            <label style={{ fontSize:12, fontWeight:700, color:T.dark, display:"block", marginBottom:6 }}>パスワード</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required
+              style={{ width:"100%", padding:"11px 12px", borderRadius:10, border:`1.5px solid ${T.border}`, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+          </div>
+          <button type="submit" disabled={loading} style={{
+            width:"100%", padding:"12px", background:loading?T.warmGray:T.orange,
+            border:"none", borderRadius:10, color:T.white, fontWeight:800, fontSize:14,
+            cursor:loading?"not-allowed":"pointer", fontFamily:"inherit"
+          }}>{loading ? "確認中..." : "ログイン"}</button>
+        </form>
+        <div style={{ marginTop:20, paddingTop:16, borderTop:`1px solid ${T.border}`, fontSize:11, color:T.warmGray, textAlign:"center" }}>
+          管理者権限が必要です
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Access Denied ─────────────────────────────────────────────────────────
+const AccessDeniedPage = ({ onLogout }) => (
+  <div style={{ minHeight:"100vh", background:T.cream, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Noto Sans JP',sans-serif" }}>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+    <div style={{ background:T.white, borderRadius:20, padding:"40px 32px", width:"100%", maxWidth:400, border:`1px solid ${T.border}`, textAlign:"center" }}>
+      <div style={{ fontSize:48, marginBottom:12 }}>🚫</div>
+      <h1 style={{ fontSize:20, fontWeight:900, color:T.dark, marginBottom:10 }}>アクセス拒否</h1>
+      <p style={{ fontSize:13, color:T.warmGray, lineHeight:1.7, marginBottom:20 }}>
+        このページは管理者のみアクセスできます。<br/>アクセス権限がありません。
+      </p>
+      <button onClick={onLogout} style={{
+        padding:"10px 24px", background:T.white, border:`1.5px solid ${T.border}`,
+        borderRadius:10, color:T.warmGray, fontWeight:700, fontSize:13, cursor:"pointer"
+      }}>ログアウト</button>
+    </div>
+  </div>
+);
+
 // ── Main App ──────────────────────────────────────────────────────────────
 export default function QoccaAdmin() {
   const [active, setActive] = useState("dashboard");
+  const [authState, setAuthState] = useState({ loading: true, user: null, isAdmin: false });
+  const [authError, setAuthError] = useState("");
 
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setAuthState({ loading: false, user: null, isAdmin: false });
+        return;
+      }
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
+      setAuthState({
+        loading: false,
+        user: session.user,
+        isAdmin: profile?.role === "admin"
+      });
+    };
+    checkAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        supabase.from("profiles").select("role").eq("id", session.user.id).single().then(({ data: profile }) => {
+          setAuthState({
+            loading: false,
+            user: session.user,
+            isAdmin: profile?.role === "admin"
+          });
+        });
+      } else {
+        setAuthState({ loading: false, user: null, isAdmin: false });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = async (user) => {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (profile?.role !== "admin") {
+      setAuthError("");
+      setAuthState({ loading: false, user, isAdmin: false });
+      return;
+    }
+    setAuthState({ loading: false, user, isAdmin: true });
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setAuthState({ loading: false, user: null, isAdmin: false });
+    setAuthError("");
+  };
+
+  // ローディング中
+  if (authState.loading) {
+    return (
+      <div style={{ minHeight:"100vh", background:T.cream, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Noto Sans JP',sans-serif" }}>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:24, fontWeight:900, color:T.orange, fontFamily:"'Helvetica Neue',Arial,sans-serif" }}>Qocca Admin</div>
+          <div style={{ marginTop:12, fontSize:12, color:T.warmGray }}>読み込み中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // 未ログイン
+  if (!authState.user) {
+    return <AdminLoginPage onLogin={handleLogin} error={authError}/>;
+  }
+
+  // ログイン済みだがadminじゃない
+  if (!authState.isAdmin) {
+    return <AccessDeniedPage onLogout={handleLogout}/>;
+  }
+
+  // 管理者としてログイン済み
   return (
     <div style={{ fontFamily:"'Noto Sans JP','Hiragino Kaku Gothic ProN',sans-serif", background:T.cream, minHeight:"100vh" }}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
@@ -1251,11 +1405,17 @@ export default function QoccaAdmin() {
             {new Date().toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <span style={{ fontSize:12, color:T.warmGray }}>👤 {authState.user.email}</span>
             <a href="https://qocca.vercel.app" target="_blank" rel="noopener noreferrer" style={{
               padding:"7px 14px", background:T.white, border:`1.5px solid ${T.border}`,
               borderRadius:8, fontSize:12, fontWeight:700, color:T.warmGray,
               textDecoration:"none", cursor:"pointer"
             }}>🌐 サイトを開く</a>
+            <button onClick={handleLogout} style={{
+              padding:"7px 14px", background:T.white, border:`1.5px solid ${T.border}`,
+              borderRadius:8, fontSize:12, fontWeight:700, color:T.warmGray,
+              cursor:"pointer", fontFamily:"inherit"
+            }}>ログアウト</button>
           </div>
         </div>
 
