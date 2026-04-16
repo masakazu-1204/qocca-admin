@@ -476,27 +476,30 @@ const ListingsPage = () => {
                       <span style={{ background:st.bg, color:st.color, fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:8 }}>{st.text}</span>
                     </td>
                     <td style={{ padding:"14px 16px" }}>
-                      {item.status==="pending" ? (
-                        <div style={{ display:"flex", gap:6 }}>
+                      <div style={{ display:"flex", gap:6 }}>
+                        {item.status !== "approved" && (
                           <button onClick={()=>handleAction(item.id,"approved")} style={{
                             padding:"6px 14px", background:T.green, border:"none", borderRadius:8,
                             color:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
                           }}>✅ 承認</button>
+                        )}
+                        {item.status !== "rejected" && (
                           <button onClick={()=>handleAction(item.id,"rejected")} style={{
                             padding:"6px 14px", background:T.white, border:`1.5px solid ${T.red}`,
                             borderRadius:8, color:T.red, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
                           }}>却下</button>
-                          <button onClick={()=>setSelected(item)} style={{
-                            padding:"6px 10px", background:T.lightGray, border:"none", borderRadius:8,
-                            color:T.warmGray, fontSize:11, cursor:"pointer", fontFamily:"inherit"
-                          }}>詳細</button>
-                        </div>
-                      ) : (
+                        )}
+                        {item.status !== "pending" && (
+                          <button onClick={()=>handleAction(item.id,"pending")} style={{
+                            padding:"6px 12px", background:T.white, border:`1.5px solid ${T.orange}`,
+                            borderRadius:8, color:T.orange, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
+                          }}>↺ 審査中</button>
+                        )}
                         <button onClick={()=>setSelected(item)} style={{
                           padding:"6px 10px", background:T.lightGray, border:"none", borderRadius:8,
                           color:T.warmGray, fontSize:11, cursor:"pointer", fontFamily:"inherit"
                         }}>詳細</button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -542,18 +545,26 @@ const ListingsPage = () => {
               <div style={{ fontSize:13, fontWeight:700, color:T.dark, marginBottom:6 }}>説明文</div>
               <div style={{ fontSize:13, color:"#555", lineHeight:1.7, background:T.cream, borderRadius:10, padding:"12px" }}>{selected.desc}</div>
             </div>
-            {selected.status==="pending" && (
-              <div style={{ display:"flex", gap:10 }}>
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+              {selected.status !== "approved" && (
                 <button onClick={()=>handleAction(selected.id,"approved")} style={{
-                  flex:1, padding:"13px", background:T.green, border:"none", borderRadius:12,
+                  flex:"1 1 30%", minWidth:120, padding:"13px", background:T.green, border:"none", borderRadius:12,
                   color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"
                 }}>✅ 承認する</button>
+              )}
+              {selected.status !== "rejected" && (
                 <button onClick={()=>handleAction(selected.id,"rejected")} style={{
-                  flex:1, padding:"13px", background:T.white, border:`2px solid ${T.red}`,
+                  flex:"1 1 30%", minWidth:120, padding:"13px", background:T.white, border:`2px solid ${T.red}`,
                   borderRadius:12, color:T.red, fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"
                 }}>❌ 却下する</button>
-              </div>
-            )}
+              )}
+              {selected.status !== "pending" && (
+                <button onClick={()=>handleAction(selected.id,"pending")} style={{
+                  flex:"1 1 30%", minWidth:120, padding:"13px", background:T.white, border:`2px solid ${T.orange}`,
+                  borderRadius:12, color:T.orange, fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"
+                }}>↺ 審査中に戻す</button>
+              )}
+            </div>
           </div>
         </div>
       )}
