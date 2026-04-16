@@ -574,21 +574,54 @@ const ListingsPage = () => {
 
 // ── Users Page ────────────────────────────────────────────────────────────
 const UsersPage = () => {
-  const [users, setUsers] = useState(USERS);
+  const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    // profilesテーブル全件取得
+    const { data: profiles } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+    // 各ユーザーの出品数をカウント
+    const userIds = (profiles || []).map(p => p.id);
+    const { data: listings } = await supabase.from("listings").select("seller_id").in("seller_id", userIds);
+    const listingCounts = {};
+    (listings || []).forEach(l => { listingCounts[l.seller_id] = (listingCounts[l.seller_id] || 0) + 1; });
+
+    setUsers((profiles || []).map(p => ({
+      id: p.id,
+      name: p.display_name || "未設定",
+      email: "",
+      role: p.role || "buyer",
+      status: p.is_suspended ? "suspended" : "active",
+      provider: "",
+      listings: listingCounts[p.id] || 0,
+      sales: 0,
+      revenue: 0,
+      joined: new Date(p.created_at).toLocaleDateString("ja-JP"),
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchUsers(); }, []);
 
   const filtered = users.filter(u => {
     if (roleFilter!=="all" && u.role!==roleFilter) return false;
-    if (search && !u.name.includes(search) && !u.email.includes(search)) return false;
+    if (search && !u.name.includes(search)) return false;
     return true;
   });
 
-  const toggleStatus = (id) => {
-    setUsers(prev => prev.map(u => u.id===id ? {...u, status: u.status==="active"?"suspended":"active"} : u));
+  const toggleStatus = async (id) => {
+    const user = users.find(u => u.id===id);
+    const newSuspended = user.status === "active";
+    const { error } = await supabase.from("profiles").update({ is_suspended: newSuspended }).eq("id", id);
+    if (error) { alert("更新に失敗しました: " + error.message); return; }
+    setUsers(prev => prev.map(u => u.id===id ? {...u, status: newSuspended ? "suspended" : "active"} : u));
   };
 
-  const providerIcon = (p) => p==="google"?"🟢":p==="twitter"?"𝕏":"✉️";
+  const roleLabel = (r) => r==="admin"?"管理者":r==="seller"?"出品者":"購入者";
+  const roleColor = (r) => r==="admin"?{bg:"#F3E5F5",color:T.purple}:r==="seller"?{bg:T.orangePale,color:T.orange}:{bg:T.bluePale,color:T.blue};
 
   return (
     <div>
@@ -600,11 +633,11 @@ const UsersPage = () => {
       <div style={{ display:"flex", gap:12, marginBottom:20, alignItems:"center" }}>
         <div style={{ position:"relative", flex:1, maxWidth:320 }}>
           <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:14 }}>🔍</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="名前・メールで検索..."
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="名前で検索..."
             style={{ width:"100%", padding:"10px 12px 10px 36px", borderRadius:10, border:`1.5px solid ${T.border}`, fontSize:13, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
         </div>
         <div style={{ display:"flex", gap:6 }}>
-          {[["all","すべて"],["seller","出品者"],["buyer","購入者"]].map(([v,l])=>(
+          {[["all","すべて"],["admin","管理者"],["seller","出品者"],["buyer","購入者"]].map(([v,l])=>(
             <button key={v} onClick={()=>setRoleFilter(v)} style={{
               padding:"8px 16px", border:`1.5px solid ${roleFilter===v?T.orange:T.border}`,
               borderRadius:10, background:roleFilter===v?T.orangePale:T.white,
@@ -615,17 +648,22 @@ const UsersPage = () => {
         </div>
       </div>
 
+      {loading ? (
+        <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>読み込み中...</div>
+      ) : (
       <div style={{ background:T.white, borderRadius:16, border:`1px solid ${T.border}`, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead>
             <tr style={{ background:T.lightGray }}>
-              {["ユーザー","ロール","登録方法","出品数","売上","累計金額","ステータス","操作"].map(h=>(
+              {["ユーザー","ロール","出品数","登録日","ステータス","操作"].map(h=>(
                 <th key={h} style={{ padding:"12px 14px", fontSize:11, fontWeight:700, color:T.warmGray, textAlign:"left", borderBottom:`1px solid ${T.border}` }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.map(u => (
+            {filtered.map(u => {
+              const rc = roleColor(u.role);
+              return (
               <tr key={u.id} style={{ borderBottom:`1px solid ${T.border}` }}>
                 <td style={{ padding:"12px 14px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -637,21 +675,18 @@ const UsersPage = () => {
                     }}>{u.name.charAt(0)}</div>
                     <div>
                       <div style={{ fontSize:13, fontWeight:700, color:T.dark }}>{u.name}</div>
-                      <div style={{ fontSize:10, color:T.warmGray }}>{u.email}</div>
+                      <div style={{ fontSize:10, color:T.warmGray }}>{u.id.slice(0, 8)}...</div>
                     </div>
                   </div>
                 </td>
                 <td style={{ padding:"12px 14px" }}>
                   <span style={{
-                    background:u.role==="seller"?T.orangePale:T.bluePale,
-                    color:u.role==="seller"?T.orange:T.blue,
+                    background:rc.bg, color:rc.color,
                     fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:8
-                  }}>{u.role==="seller"?"出品者":"購入者"}</span>
+                  }}>{roleLabel(u.role)}</span>
                 </td>
-                <td style={{ padding:"12px 14px", fontSize:13 }}>{providerIcon(u.provider)} {u.provider}</td>
                 <td style={{ padding:"12px 14px", fontSize:13, color:T.dark }}>{u.listings}</td>
-                <td style={{ padding:"12px 14px", fontSize:13, color:T.dark }}>{u.sales}件</td>
-                <td style={{ padding:"12px 14px", fontSize:13, fontWeight:700, color:T.orange }}>¥{u.revenue.toLocaleString()}</td>
+                <td style={{ padding:"12px 14px", fontSize:12, color:T.warmGray }}>{u.joined}</td>
                 <td style={{ padding:"12px 14px" }}>
                   <span style={{
                     background:u.status==="active"?T.greenPale:T.redPale,
@@ -667,22 +702,57 @@ const UsersPage = () => {
                   }}>{u.status==="active"?"停止":"復帰"}</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
+        {filtered.length===0 && (
+          <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>👥</div>
+            <div style={{ fontWeight:700 }}>該当するユーザーがいません</div>
+          </div>
+        )}
       </div>
+      )}
     </div>
   );
 };
 
 // ── Reports Page ──────────────────────────────────────────────────────────
 const ReportsPage = () => {
-  const [reports, setReports] = useState(REPORTS);
+  const [reports, setReports] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+
+  const fetchReports = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("reports").select("*").order("created_at", { ascending: false });
+    // 通報者の名前を取得
+    const reporterIds = [...new Set((data || []).map(r => r.reporter_id).filter(Boolean))];
+    const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("id", reporterIds);
+    const profileMap = {};
+    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+
+    setReports((data || []).map(r => ({
+      id: r.id,
+      type: r.report_type || "通報",
+      target: r.target_type === "listing" ? `出品 #${r.target_id?.slice(0,8)}` : r.target_type === "user" ? `ユーザー #${r.target_id?.slice(0,8)}` : `対象 #${r.target_id?.slice(0,8)}`,
+      reporter: profileMap[r.reporter_id]?.display_name || "匿名",
+      severity: r.severity || "medium",
+      status: r.status || "new",
+      desc: r.description || "",
+      date: new Date(r.created_at).toLocaleDateString("ja-JP"),
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchReports(); }, []);
 
   const filtered = reports.filter(r => filter==="all" || r.status===filter);
 
-  const handleStatus = (id, status) => {
+  const handleStatus = async (id, status) => {
+    const { error } = await supabase.from("reports").update({ status }).eq("id", id);
+    if (error) { alert("更新に失敗しました: " + error.message); return; }
     setReports(prev => prev.map(r => r.id===id ? {...r, status} : r));
   };
 
@@ -717,6 +787,14 @@ const ReportsPage = () => {
         </div>
       </div>
 
+      {loading ? (
+        <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>読み込み中...</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ background:T.white, borderRadius:16, padding:"48px 20px", border:`1px solid ${T.border}`, textAlign:"center", color:T.warmGray }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>✨</div>
+          <div style={{ fontWeight:700 }}>通報はありません</div>
+        </div>
+      ) : (
       <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
         {filtered.map(r => {
           const sev = severityStyle(r.severity);
@@ -728,9 +806,8 @@ const ReportsPage = () => {
             }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
                 <div>
-                  <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
-                    <span style={{ fontSize:14 }}>{r.type.split(" ")[0]}</span>
-                    <span style={{ fontSize:15, fontWeight:800, color:T.dark }}>{r.type.split(" ").slice(1).join(" ")}</span>
+                  <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:15, fontWeight:800, color:T.dark }}>{r.type}</span>
                     <span style={{ background:sev.bg, color:sev.color, fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:6 }}>{sev.label}</span>
                     <span style={{ background:sts.bg, color:sts.color, fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:6 }}>{sts.label}</span>
                   </div>
@@ -741,44 +818,76 @@ const ReportsPage = () => {
                   <div>通報者：{r.reporter}</div>
                 </div>
               </div>
-              <div style={{ fontSize:13, color:"#555", lineHeight:1.7, background:T.cream, borderRadius:10, padding:"12px", marginBottom:12 }}>
-                {r.desc}
-              </div>
-              {r.status !== "resolved" && (
-                <div style={{ display:"flex", gap:8 }}>
-                  {r.status==="new" && (
-                    <button onClick={()=>handleStatus(r.id,"investigating")} style={{
-                      padding:"8px 16px", background:T.orange, border:"none", borderRadius:8,
-                      color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
-                    }}>🔍 調査開始</button>
-                  )}
+              {r.desc && (
+                <div style={{ fontSize:13, color:"#555", lineHeight:1.7, background:T.cream, borderRadius:10, padding:"12px", marginBottom:12 }}>
+                  {r.desc}
+                </div>
+              )}
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                {r.status !== "new" && (
+                  <button onClick={()=>handleStatus(r.id,"new")} style={{
+                    padding:"8px 16px", background:T.white, border:`1.5px solid ${T.red}`, borderRadius:8,
+                    color:T.red, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
+                  }}>↺ 新規に戻す</button>
+                )}
+                {r.status !== "investigating" && (
+                  <button onClick={()=>handleStatus(r.id,"investigating")} style={{
+                    padding:"8px 16px", background:T.orange, border:"none", borderRadius:8,
+                    color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
+                  }}>🔍 調査中にする</button>
+                )}
+                {r.status !== "resolved" && (
                   <button onClick={()=>handleStatus(r.id,"resolved")} style={{
                     padding:"8px 16px", background:T.green, border:"none", borderRadius:8,
                     color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
                   }}>✅ 対応完了</button>
-                  <button style={{
-                    padding:"8px 16px", background:T.white, border:`1.5px solid ${T.red}`, borderRadius:8,
-                    color:T.red, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
-                  }}>🚫 出品削除</button>
-                  <button style={{
-                    padding:"8px 16px", background:T.white, border:`1.5px solid ${T.warmGray}`, borderRadius:8,
-                    color:T.warmGray, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
-                  }}>⚠️ 警告送付</button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           );
         })}
       </div>
+      )}
     </div>
   );
 };
 
 // ── Events Review Page ────────────────────────────────────────────────────
 const EventsReviewPage = () => {
-  const [events, setEvents] = useState(PENDING_EVENTS);
+  const [events, setEvents] = useState([]);
+  const [filter, setFilter] = useState("pending");
+  const [loading, setLoading] = useState(true);
 
-  const handleAction = (id, action) => {
+  const fetchEvents = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("events").select("*").order("created_at", { ascending: false });
+    const organizerIds = [...new Set((data || []).map(e => e.organizer_id).filter(Boolean))];
+    const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("id", organizerIds);
+    const profileMap = {};
+    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+
+    setEvents((data || []).map(e => ({
+      id: e.id,
+      title: e.title,
+      organizer: profileMap[e.organizer_id]?.display_name || "不明",
+      date: e.event_date || "",
+      place: e.location || "",
+      fee: e.fee || "無料",
+      pet: e.pet_type || "both",
+      desc: e.description || "",
+      status: e.status || "pending",
+      submitted: new Date(e.created_at).toLocaleDateString("ja-JP"),
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchEvents(); }, []);
+
+  const filtered = events.filter(e => filter==="all" || e.status===filter);
+
+  const handleAction = async (id, action) => {
+    const { error } = await supabase.from("events").update({ status: action }).eq("id", id);
+    if (error) { alert("更新に失敗しました: " + error.message); return; }
     setEvents(prev => prev.map(e => e.id===id ? {...e, status:action} : e));
   };
 
@@ -786,61 +895,88 @@ const EventsReviewPage = () => {
 
   return (
     <div>
-      <div style={{ marginBottom:24 }}>
-        <h1 style={{ fontSize:26, fontWeight:900, color:T.dark, marginBottom:4 }}>イベント審査</h1>
-        <p style={{ fontSize:13, color:T.warmGray }}>投稿されたイベントの承認・却下</p>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
+        <div>
+          <h1 style={{ fontSize:26, fontWeight:900, color:T.dark, marginBottom:4 }}>イベント審査</h1>
+          <p style={{ fontSize:13, color:T.warmGray }}>投稿されたイベントの承認・却下</p>
+        </div>
+        <div style={{ display:"flex", gap:6 }}>
+          {[["pending","審査待ち"],["approved","承認済み"],["rejected","却下"],["all","すべて"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setFilter(v)} style={{
+              padding:"7px 16px", border:`1.5px solid ${filter===v?T.orange:T.border}`,
+              borderRadius:10, background:filter===v?T.orangePale:T.white,
+              color:filter===v?T.orange:T.warmGray, fontSize:12, fontWeight:700,
+              cursor:"pointer", fontFamily:"inherit"
+            }}>{l}</button>
+          ))}
+        </div>
       </div>
 
+      {loading ? (
+        <div style={{ textAlign:"center", padding:"48px 20px", color:T.warmGray }}>読み込み中...</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ background:T.white, borderRadius:16, padding:"48px 20px", border:`1px solid ${T.border}`, textAlign:"center", color:T.warmGray }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>📅</div>
+          <div style={{ fontWeight:700 }}>イベントはありません</div>
+        </div>
+      ) : (
       <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-        {events.map(ev => {
-          const isPending = ev.status==="pending";
-          return (
-            <div key={ev.id} style={{
-              background:T.white, borderRadius:16, padding:"24px", border:`1px solid ${T.border}`,
-              opacity:isPending?1:0.6
-            }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
-                <div>
-                  <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
-                    <span style={{ fontSize:20 }}>📅</span>
-                    <span style={{ fontSize:18, fontWeight:900, color:T.dark }}>{ev.title}</span>
-                    {isPending && <span style={{ background:T.orangePale, color:T.orange, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:8 }}>審査待ち</span>}
-                    {ev.status==="approved" && <span style={{ background:T.greenPale, color:T.green, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:8 }}>承認済み</span>}
-                    {ev.status==="rejected" && <span style={{ background:T.redPale, color:T.red, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:8 }}>却下</span>}
-                  </div>
-                  <div style={{ fontSize:12, color:T.warmGray }}>投稿日：{ev.submitted}</div>
+        {filtered.map(ev => (
+          <div key={ev.id} style={{
+            background:T.white, borderRadius:16, padding:"24px", border:`1px solid ${T.border}`
+          }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+              <div>
+                <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:20 }}>📅</span>
+                  <span style={{ fontSize:18, fontWeight:900, color:T.dark }}>{ev.title}</span>
+                  {ev.status==="pending" && <span style={{ background:T.orangePale, color:T.orange, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:8 }}>審査待ち</span>}
+                  {ev.status==="approved" && <span style={{ background:T.greenPale, color:T.green, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:8 }}>承認済み</span>}
+                  {ev.status==="rejected" && <span style={{ background:T.redPale, color:T.red, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:8 }}>却下</span>}
                 </div>
+                <div style={{ fontSize:12, color:T.warmGray }}>投稿日：{ev.submitted}</div>
               </div>
+            </div>
 
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:16 }}>
-                {[["📅 開催日",ev.date],["📍 場所",ev.place],["💰 参加費",ev.fee],["👤 主催者",ev.organizer],["🐾 対象",petLabel(ev.pet)]].map(([k,v])=>(
-                  <div key={k} style={{ background:T.lightGray, borderRadius:10, padding:"10px 12px" }}>
-                    <div style={{ fontSize:10, color:T.warmGray, marginBottom:2 }}>{k}</div>
-                    <div style={{ fontSize:13, fontWeight:700, color:T.dark }}>{v}</div>
-                  </div>
-                ))}
-              </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:16 }}>
+              {[["📅 開催日",ev.date],["📍 場所",ev.place],["💰 参加費",ev.fee],["👤 主催者",ev.organizer],["🐾 対象",petLabel(ev.pet)]].map(([k,v])=>(
+                <div key={k} style={{ background:T.lightGray, borderRadius:10, padding:"10px 12px" }}>
+                  <div style={{ fontSize:10, color:T.warmGray, marginBottom:2 }}>{k}</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:T.dark }}>{v || "-"}</div>
+                </div>
+              ))}
+            </div>
 
+            {ev.desc && (
               <div style={{ fontSize:13, color:"#555", lineHeight:1.7, background:T.cream, borderRadius:10, padding:"12px", marginBottom:16 }}>
                 {ev.desc}
               </div>
+            )}
 
-              {isPending && (
-                <div style={{ display:"flex", gap:10 }}>
-                  <button onClick={()=>handleAction(ev.id,"approved")} style={{
-                    padding:"10px 24px", background:T.green, border:"none", borderRadius:10,
-                    color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"
-                  }}>✅ 承認する</button>
-                  <button onClick={()=>handleAction(ev.id,"rejected")} style={{
-                    padding:"10px 24px", background:T.white, border:`2px solid ${T.red}`,
-                    borderRadius:10, color:T.red, fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"
-                  }}>❌ 却下する</button>
-                </div>
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+              {ev.status !== "approved" && (
+                <button onClick={()=>handleAction(ev.id,"approved")} style={{
+                  padding:"10px 24px", background:T.green, border:"none", borderRadius:10,
+                  color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"
+                }}>✅ 承認する</button>
+              )}
+              {ev.status !== "rejected" && (
+                <button onClick={()=>handleAction(ev.id,"rejected")} style={{
+                  padding:"10px 24px", background:T.white, border:`2px solid ${T.red}`,
+                  borderRadius:10, color:T.red, fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"
+                }}>❌ 却下する</button>
+              )}
+              {ev.status !== "pending" && (
+                <button onClick={()=>handleAction(ev.id,"pending")} style={{
+                  padding:"10px 24px", background:T.white, border:`2px solid ${T.orange}`,
+                  borderRadius:10, color:T.orange, fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"
+                }}>↺ 審査中に戻す</button>
               )}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
+      )}
     </div>
   );
 };
