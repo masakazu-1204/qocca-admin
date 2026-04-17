@@ -410,6 +410,30 @@ const ListingsPage = () => {
     if (err) { alert("更新に失敗しました: " + err.message); return; }
     setListings(prev => prev.map(l => l.id===id ? {...l, status:action} : l));
     setSelected(null);
+
+    // メール自動送信（承認 or 却下時）
+    if (action === "approved" || action === "rejected") {
+      const listing = listings.find(l => l.id === id);
+      if (listing && listing.sellerId) {
+        try {
+          // seller_idからメールアドレスを取得（auth.usersにアクセスできないため、send-emailのEdge Function内で取得する）
+          await supabase.functions.invoke("send-email", {
+            body: {
+              type: action === "approved" ? "listing_approved" : "listing_rejected",
+              seller_id: listing.sellerId,
+              data: {
+                user_name: listing.seller,
+                listing_title: listing.title,
+                category: listing.category,
+                price: listing.price?.toLocaleString(),
+                listing_url: `https://qocca.pet`,
+                rejection_reason: action === "rejected" ? "利用規約に準拠しない内容が含まれていました。詳しくはサポートまでお問い合わせください。" : "",
+              }
+            }
+          });
+        } catch (e) { console.log("メール送信エラー:", e); }
+      }
+    }
   };
 
   const statusLabel = (s) => {
